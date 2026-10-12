@@ -1,0 +1,152 @@
+name: Build Footprint Desk APK
+
+on:
+  push:
+    paths: ['footprint_desk.html', '.github/workflows/footprint-apk.yml']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check HTML present
+        run: |
+          if [ ! -f footprint_desk.html ]; then
+            echo "footprint_desk.html repo root me upload karo"; exit 1
+          fi
+
+      - name: Generate Android project
+        run: |
+          P=build-app
+          mkdir -p $P/app/src/main/assets $P/app/src/main/java/com/jay/footprint
+          cp footprint_desk.html $P/app/src/main/assets/index.html
+
+          cat > $P/settings.gradle <<'EOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "FootprintDesk"
+          include ':app'
+          EOF
+
+          cat > $P/build.gradle <<'EOF'
+          plugins { id 'com.android.application' version '8.5.2' apply false }
+          EOF
+
+          cat > $P/gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2g
+          android.useAndroidX=true
+          EOF
+
+          cat > $P/app/build.gradle <<'EOF'
+          plugins { id 'com.android.application' }
+          android {
+              namespace 'com.jay.footprint'
+              compileSdk 34
+              defaultConfig {
+                  applicationId 'com.jay.footprint'
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+              }
+              buildTypes { release { minifyEnabled false } }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          EOF
+
+          cat > $P/app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <application
+                  android:label="Footprint Desk"
+                  android:icon="@android:drawable/ic_menu_sort_by_size"
+                  android:hardwareAccelerated="true"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > $P/app/src/main/java/com/jay/footprint/MainActivity.java <<'EOF'
+          package com.jay.footprint;
+
+          import android.app.Activity;
+          import android.graphics.Color;
+          import android.os.Bundle;
+          import android.view.WindowManager;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+
+          public class MainActivity extends Activity {
+              private WebView web;
+
+              @Override
+              protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                  getWindow().setStatusBarColor(Color.parseColor("#121720"));
+                  getWindow().setNavigationBarColor(Color.parseColor("#0b0e13"));
+                  web = new WebView(this);
+                  web.setBackgroundColor(Color.parseColor("#0b0e13"));
+                  WebSettings s = web.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setAllowFileAccess(true);
+                  s.setAllowUniversalAccessFromFileURLs(true);
+                  s.setCacheMode(WebSettings.LOAD_NO_CACHE);
+                  web.setWebViewClient(new WebViewClient());
+                  setContentView(web);
+                  web.loadUrl("file:///android_asset/index.html");
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (web != null && web.canGoBack()) web.goBack(); else super.onBackPressed();
+              }
+
+              @Override
+              protected void onDestroy() {
+                  if (web != null) web.destroy();
+                  super.onDestroy();
+              }
+          }
+          EOF
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+
+      - name: Build debug APK
+        working-directory: build-app
+        run: gradle assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FootprintDesk-apk
+          path: build-app/app/build/outputs/apk/debug/*.apk
